@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       cell_id:
-        description: 'Cell ID (S1, S2, S3, D1, ..., C10, etc.)'
+        description: 'Cell ID'
         required: true
         type: string
 
@@ -29,31 +29,34 @@ jobs:
             exit 99
           fi
           echo "config=$CELL_JSON" >> $GITHUB_OUTPUT
-          echo "Loaded config for ${{ inputs.cell_id }}:"
-          echo "$CELL_JSON" | jq .
 
-      - name: Network reachability check
+      - name: Install lftp + jq
         run: |
-          echo "Probing $VPS_IP..."
+          sudo apt-get update -qq
+          sudo apt-get install -y lftp jq openssh-client 2>&1 | tail -2
+
+      - name: Network reachability + direct lftp baseline
+        run: |
+          echo "--- GH runner IP ---"
+          curl -s https://api.ipify.org
+          echo ""
+          echo "--- Port probe ---"
           for p in 21 990; do
             timeout 5 bash -c "</dev/tcp/$VPS_IP/$p" 2>&1 && echo "port $p OPEN" || echo "port $p closed/filtered"
           done
-          echo "--- GH runner IP ---"
-          timeout 5 curl -s https://api.ipify.org 2>&1 || echo "no outbound"
-
-      - name: Show cell description
-        run: |
-          DESC=$(jq -r --arg c "${{ inputs.cell_id }}" '.[$c].description' cell-config.json)
-          echo "::group::[${{ inputs.cell_id }}] $DESC"
-          echo "$DESC"
-
-      - name: Pre-setup (only for cells that need it)
-        if: ${{ fromJson(steps.cellcfg.outputs.config).presetup != null }}
-        run: |
-          set -eu
-          PRESETUP='${{ fromJson(steps.cellcfg.outputs.config).presetup }}'
-          echo "Pre-setup: $PRESETUP"
-          eval "$PRESETUP"
+          echo "--- Direct lftp test (baseline) ---"
+          cat > /tmp/fix-baseline/index.html 2>/dev/null || mkdir -p /tmp/fix-baseline && cat > /tmp/fix-baseline/index.html <<'EOF'
+          <html><body><h1>Baseline</h1></body></html>
+          EOF
+          lftp -d -e "
+            set net:timeout 15s
+            set ftp:ssl-allow no
+            open ftp://$FTP_USER:$FTP_PASSWORD@$VPS_IP:21
+            put /tmp/fix-baseline/index.html -o baseline-test.html
+            ls
+            quit
+          " 2>&1 | tail -20
+          echo "--- baseline rc: $? ---"
 
       - name: Setup fixture
         run: |
@@ -67,7 +70,14 @@ jobs:
           mkdir -p /tmp/fix/assets
           echo "keep me" > /tmp/fix/assets/.keep
           echo "ignored" > /tmp/fix/local.bak
-          ls -la /tmp/fix/
+
+      - name: Pre-setup (only for cells that need it)
+        if: ${{ fromJson(steps.cellcfg.outputs.config).presetup != null }}
+        run: |
+          set -eu
+          PRESETUP='${{ fromJson(steps.cellcfg.outputs.config).presetup }}'
+          echo "Pre-setup: $PRESETUP"
+          eval "$PRESETUP"
 
       - name: Run ftp-deployment-action
         id: run
@@ -87,7 +97,7 @@ jobs:
           lftp_settings: ${{ fromJson(steps.cellcfg.outputs.config).lftp_settings || '' }}
           exclude: ${{ fromJson(steps.cellcfg.outputs.config).exclude || '' }}
           exclude_delete: ${{ fromJson(steps.cellcfg.outputs.config).exclude_delete || '' }}
-          debug: ${{ fromJson(steps.cellcfg.outputs.config).debug || 'false' }}
+          debug: ${{ fromJson(steps.cellcfg.outputs.config).debug || 'true' }}
           dry_run: ${{ fromJson(steps.cellcfg.outputs.config).dry_run || 'false' }}
           delete: ${{ fromJson(steps.cellcfg.outputs.config).delete || 'false' }}
           concurrency_lock: ${{ fromJson(steps.cellcfg.outputs.config).concurrency_lock || 'false' }}
@@ -96,18 +106,17 @@ jobs:
         env:
           DEBUG: 'true'
 
-      - name: Verify state on VPS
+      - name: Check action outcome
         if: always()
         run: |
-          echo "--- Files on VPS after action ---"
-          echo "(checking via direct SSH)"
-        # This won't work without SSH key. Document for now.
+          echo "Action outcome: ${{ steps.run.outcome }}"
+          echo "Action conclusion: ${{ steps.run.conclusion }}"
 
-      - name: Upload lftp log
+      - name: Upload lftp log (best-effort, action's log dir)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cell-${{ inputs.cell_id }}-log
           path: |
-            /home/lftp/.lftp-logs/*.log
+            /tmp/lftp-dump/*.log
           if-no-files-found: ignore
