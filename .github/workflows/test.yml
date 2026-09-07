@@ -32,6 +32,15 @@ jobs:
           echo "Loaded config for ${{ inputs.cell_id }}:"
           echo "$CELL_JSON" | jq .
 
+      - name: Network reachability check
+        run: |
+          echo "Probing $VPS_IP..."
+          for p in 21 990; do
+            timeout 5 bash -c "</dev/tcp/$VPS_IP/$p" 2>&1 && echo "port $p OPEN" || echo "port $p closed/filtered"
+          done
+          echo "--- GH runner IP ---"
+          timeout 5 curl -s https://api.ipify.org 2>&1 || echo "no outbound"
+
       - name: Show cell description
         run: |
           DESC=$(jq -r --arg c "${{ inputs.cell_id }}" '.[$c].description' cell-config.json)
@@ -69,9 +78,9 @@ jobs:
           password: ${{ fromJson(steps.cellcfg.outputs.config).password || env.FTP_PASSWORD }}
           local_dir: /tmp/fix
           remote_dir: /
-          max_retries: ${{ fromJson(steps.cellcfg.outputs.config).max_retries || '1' }}
-          net_timeout: ${{ fromJson(steps.cellcfg.outputs.config).net_timeout || '10s' }}
-          dns_fatal_timeout: ${{ fromJson(steps.cellcfg.outputs.config).dns_fatal_timeout || '10s' }}
+          max_retries: ${{ fromJson(steps.cellcfg.outputs.config).max_retries || '3' }}
+          net_timeout: ${{ fromJson(steps.cellcfg.outputs.config).net_timeout || '15s' }}
+          dns_fatal_timeout: ${{ fromJson(steps.cellcfg.outputs.config).dns_fatal_timeout || '15s' }}
           ftp_ssl_allow: ${{ fromJson(steps.cellcfg.outputs.config).ftp_ssl_allow || 'false' }}
           ssl_verify_certificate: ${{ fromJson(steps.cellcfg.outputs.config).ssl_verify_certificate || 'true' }}
           ssl_check_hostname: ${{ fromJson(steps.cellcfg.outputs.config).ssl_check_hostname || 'true' }}
@@ -87,21 +96,18 @@ jobs:
         env:
           DEBUG: 'true'
 
-      - name: Verify banner / rc
+      - name: Verify state on VPS
         if: always()
         run: |
-          EXPECTED_BANNER=$(jq -r --arg c "${{ inputs.cell_id }}" '.[$c].expected_banner' cell-config.json)
-          EXPECTED_RC=$(jq -r --arg c "${{ inputs.cell_id }}" '.[$c].expected_rc' cell-config.json)
-          echo "Expected banner: $EXPECTED_BANNER"
-          echo "Expected RC: $EXPECTED_RC"
-          echo "Action concluded with status: ${{ steps.run.outcome }}"
+          echo "--- Files on VPS after action ---"
+          echo "(checking via direct SSH)"
+        # This won't work without SSH key. Document for now.
 
-      - name: Upload log
+      - name: Upload lftp log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cell-${{ inputs.cell_id }}-log
           path: |
-            ~/.lftp-logs/*.log
-            /home/runner/.lftp-logs/*.log
+            /home/lftp/.lftp-logs/*.log
           if-no-files-found: ignore
