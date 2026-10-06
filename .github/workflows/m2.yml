@@ -6,7 +6,7 @@ jobs:
     steps:
       - run: mkdir -p site/assets && echo "smoke $(date -u)" > site/index.html && echo about > site/about.html && echo x > site/old.bak && touch site/assets/.keep
       - name: Dry run
-        uses: airvzxf/ftp-deployment-action@798c09892bca622e650c596fef67666d7721997f
+        uses: airvzxf/ftp-deployment-action@9811f438a420e4d3782f1375dd472385ad9e9e7e
         with:
           server: ${{ secrets.FTP_SERVER }}
           user: ${{ secrets.FTP_USERNAME }}
@@ -15,7 +15,7 @@ jobs:
           remote_dir: m2-smoke
           dry_run: 'true'
       - name: Upload
-        uses: airvzxf/ftp-deployment-action@798c09892bca622e650c596fef67666d7721997f
+        uses: airvzxf/ftp-deployment-action@9811f438a420e4d3782f1375dd472385ad9e9e7e
         with:
           server: ${{ secrets.FTP_SERVER }}
           user: ${{ secrets.FTP_USERNAME }}
@@ -30,7 +30,7 @@ jobs:
       - name: Upload with a wrong password (must fail)
         id: bad
         continue-on-error: true
-        uses: airvzxf/ftp-deployment-action@798c09892bca622e650c596fef67666d7721997f
+        uses: airvzxf/ftp-deployment-action@9811f438a420e4d3782f1375dd472385ad9e9e7e
         with:
           server: ${{ secrets.FTP_SERVER }}
           user: ${{ secrets.FTP_USERNAME }}
