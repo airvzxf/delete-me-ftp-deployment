@@ -1,0 +1,18 @@
+name: ftp-diag
+on: workflow_dispatch
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Egress IPs (5 separate connections)
+        run: for i in 1 2 3 4 5; do curl -s -4 --max-time 5 https://api.ipify.org; echo; done | sort | uniq -c
+      - name: lftp upload with debug
+        env:
+          H: ${{ secrets.FTP_HOST }}
+          U: ${{ secrets.FTP_USERNAME }}
+          P: ${{ secrets.FTP_PASSWORD }}
+        run: |
+          sudo apt-get install -y -qq lftp >/dev/null
+          mkdir -p site && echo hi > site/index.html
+          printf 'machine %s login %s password %s\n' "$H" "$U" "$P" > ~/.netrc; chmod 600 ~/.netrc
+          timeout 90 lftp -e "debug 3; set net:max-retries 1; set net:persist-retries 0; set ssl:verify-certificate true; set ftp:ssl-allow true; set net:timeout 15s; mirror -R --verbose=1 site diag-dir; quit" "ftp://$U@$H:5221" 2>&1 | grep -vE 'Peer certificate|^---> PASS' | tail -40 || true
